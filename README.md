@@ -53,6 +53,14 @@ Until `batt` is installed, CoolCharge operates as a read-only battery-temperatur
 - The `batt` daemon for charge-control features.
 - Xcode with command-line tools to build the app and compile its asset catalog.
 
+## Install from the DMG
+
+1. Download `CoolCharge-0.1.0.dmg` from the [latest GitHub release](https://github.com/saitrogen/CoolCharge/releases/latest).
+2. Open the DMG and drag **CoolCharge** onto the **Applications** shortcut.
+3. Start the `batt` service as described above, then open CoolCharge.
+
+The current community build is ad-hoc signed because it does not yet have an Apple Developer ID certificate or notarization. On first launch, macOS may require you to Control-click the app and choose **Open**, or approve it under **System Settings → Privacy & Security**. The SHA-256 checksum is included with every release.
+
 ## Build from source
 
 ```sh
@@ -62,6 +70,14 @@ zsh Scripts/build-app.sh
 ```
 
 The locally signed application is created at `CoolCharge.app`. You can launch it directly or copy it to `/Applications`.
+
+Create a compressed drag-to-Applications DMG with:
+
+```sh
+zsh Scripts/package-dmg.sh
+```
+
+The DMG and its SHA-256 checksum are written to `dist/`.
 
 Run the policy tests with:
 

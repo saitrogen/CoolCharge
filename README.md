@@ -46,6 +46,8 @@ Do not install `batt` using multiple methods at the same time. Disable macOS **O
 
 Until `batt` is installed, CoolCharge operates as a read-only battery-temperature monitor and its charging buttons remain disabled.
 
+On first launch, CoolCharge’s setup assistant checks battery telemetry, distinguishes a missing `batt` installation from a stopped daemon, and inspects macOS for active Apple charging policies. It provides copyable setup commands and direct links to Terminal, the official `batt` guide, and Battery Settings. Because macOS does not reliably expose both Battery Settings switch positions through a public API, the assistant asks for one manual confirmation after reporting everything it can verify.
+
 ## Requirements
 
 - An Apple-silicon MacBook.
@@ -55,7 +57,7 @@ Until `batt` is installed, CoolCharge operates as a read-only battery-temperatur
 
 ## Install from the DMG
 
-1. Download `CoolCharge-0.1.0.dmg` from the [latest GitHub release](https://github.com/saitrogen/CoolCharge/releases/latest).
+1. Download the newest CoolCharge DMG from the [latest GitHub release](https://github.com/saitrogen/CoolCharge/releases/latest).
 2. Open the DMG and drag **CoolCharge** onto the **Applications** shortcut.
 3. Start the `batt` service as described above, then open CoolCharge.
 

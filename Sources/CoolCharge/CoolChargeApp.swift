@@ -1,4 +1,5 @@
 import CoolChargeCore
+import AppKit
 import SwiftUI
 
 @main
@@ -26,6 +27,9 @@ struct CoolChargeApp: App {
 
 private struct CoolChargeView: View {
     @ObservedObject var model: AppModel
+    @AppStorage("hasCompletedWelcome") private var hasCompletedWelcome = false
+    @State private var showingSetup = false
+    @State private var copiedSetupCommand = false
 
     var body: some View {
         VStack(spacing: 0) {
@@ -39,11 +43,18 @@ private struct CoolChargeView: View {
                 ScrollView {
                     VStack(alignment: .leading, spacing: 16) {
                         Color.clear.frame(height: 0).id("panelTop")
-                        stateBanner
-                        controls
-                        statusCard
-                        telemetryCard
-                        settings
+                        if showingSetup {
+                            setupAssistant
+                        } else {
+                            if !model.chargeControlReady {
+                                setupAttentionBanner
+                            }
+                            stateBanner
+                            controls
+                            statusCard
+                            telemetryCard
+                            settings
+                        }
                     }
                     .padding(18)
                 }
@@ -59,9 +70,151 @@ private struct CoolChargeView: View {
         }
         .frame(width: 370, height: 650)
         .onAppear {
+            if !hasCompletedWelcome {
+                showingSetup = true
+            }
             DispatchQueue.main.async {
                 NSApp.keyWindow?.makeFirstResponder(nil)
             }
+        }
+    }
+
+    private var setupAssistant: some View {
+        VStack(alignment: .leading, spacing: 14) {
+            VStack(alignment: .leading, spacing: 6) {
+                Image(systemName: "snowflake.circle.fill")
+                    .font(.system(size: 34))
+                    .foregroundStyle(.cyan)
+                Text("Welcome to CoolCharge")
+                    .font(.title2.weight(.semibold))
+                Text("A quick safety check prevents macOS and CoolCharge from trying to manage charging at the same time.")
+                    .font(.subheadline)
+                    .foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+
+            setupStep(
+                state: model.reading == nil ? .checking : .ready,
+                title: "Battery telemetry",
+                detail: model.reading == nil
+                    ? "Waiting for the first battery reading."
+                    : "Battery percentage and temperature are available."
+            ) {
+                EmptyView()
+            }
+
+            setupStep(
+                state: backendStepState,
+                title: "Charging backend",
+                detail: backendStepDetail
+            ) {
+                if model.backendSetupState == .notInstalled || model.backendSetupState == .daemonUnavailable {
+                    VStack(alignment: .leading, spacing: 8) {
+                        Text(model.backendSetupCommand)
+                            .font(.caption.monospaced())
+                            .textSelection(.enabled)
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                            .padding(8)
+                            .background(.black.opacity(0.18), in: RoundedRectangle(cornerRadius: 7))
+
+                        HStack(spacing: 8) {
+                            Button(copiedSetupCommand ? "Copied" : "Copy Commands") {
+                                copySetupCommand()
+                            }
+                            Button("Open Terminal") {
+                                NSWorkspace.shared.open(URL(fileURLWithPath: "/System/Applications/Utilities/Terminal.app"))
+                            }
+                            Button("Guide") {
+                                openURL("https://github.com/charlie0129/batt#installation")
+                            }
+                        }
+                        .buttonStyle(.bordered)
+                        .controlSize(.small)
+                    }
+                }
+            }
+
+            setupStep(
+                state: appleSettingsStepState,
+                title: "Apple charging controls",
+                detail: appleSettingsStepDetail
+            ) {
+                VStack(alignment: .leading, spacing: 8) {
+                    Text("Turn off Optimized Battery Charging and Apple’s Charge Limit while CoolCharge is controlling the battery.")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                        .fixedSize(horizontal: false, vertical: true)
+
+                    HStack(spacing: 8) {
+                        Button("Open Battery Settings") {
+                            openBatterySettings()
+                        }
+                        if !model.appleSettingsConfirmed {
+                            Button("I Turned Both Off") {
+                                model.confirmAppleSettingsAreOff()
+                            }
+                            .disabled(model.appleChargingPolicyStatus.hasActivePolicy)
+                        }
+                    }
+                    .buttonStyle(.bordered)
+                    .controlSize(.small)
+                }
+            }
+
+            HStack(spacing: 10) {
+                Button("Recheck") {
+                    copiedSetupCommand = false
+                    model.refresh()
+                }
+                .buttonStyle(.bordered)
+
+                Spacer()
+
+                if model.setupIsReady {
+                    Button("Start CoolCharge") {
+                        finishSetup()
+                    }
+                    .buttonStyle(.borderedProminent)
+                } else {
+                    Button("Continue Monitoring") {
+                        finishSetup()
+                    }
+                    .buttonStyle(.bordered)
+                }
+            }
+
+            Text(model.setupIsReady
+                ? "Setup complete. CoolCharge can now manage charging."
+                : "Monitoring is safe without setup; charging controls remain unavailable until every required check is complete.")
+                .font(.caption2)
+                .foregroundStyle(.secondary)
+                .fixedSize(horizontal: false, vertical: true)
+        }
+    }
+
+    private var setupAttentionBanner: some View {
+        HStack(alignment: .top, spacing: 10) {
+            Image(systemName: "exclamationmark.shield.fill")
+                .foregroundStyle(.orange)
+                .font(.title3)
+            VStack(alignment: .leading, spacing: 3) {
+                Text("Finish charge-control setup")
+                    .font(.subheadline.weight(.semibold))
+                Text(model.setupAttentionSummary)
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+            Spacer(minLength: 8)
+            Button("Review") { showingSetup = true }
+                .buttonStyle(.bordered)
+                .controlSize(.small)
+        }
+        .padding(12)
+        .background(.orange.opacity(0.10), in: RoundedRectangle(cornerRadius: 12))
+        .overlay {
+            RoundedRectangle(cornerRadius: 12)
+                .stroke(.orange.opacity(0.25), lineWidth: 1)
         }
     }
 
@@ -125,9 +278,9 @@ private struct CoolChargeView: View {
                     Text("Applying…")
                 } else {
                     Circle()
-                        .fill(model.backendAvailable ? Color.green : Color.orange)
+                        .fill(model.chargeControlReady ? Color.green : Color.orange)
                         .frame(width: 7, height: 7)
-                    Text("Live · 15s")
+                    Text(model.chargeControlReady ? "Live · 15s" : "Setup")
                 }
             }
             .font(.caption.weight(.medium).monospacedDigit())
@@ -357,17 +510,124 @@ private struct CoolChargeView: View {
     private var footer: some View {
         HStack(spacing: 8) {
             Circle()
-                .fill(model.backendAvailable ? Color.green : Color.orange)
+                .fill(model.chargeControlReady ? Color.green : Color.orange)
                 .frame(width: 8, height: 8)
             Text(model.message)
                 .font(.caption)
                 .foregroundStyle(.secondary)
                 .lineLimit(1)
             Spacer()
+            Button(showingSetup ? "Dashboard" : "Setup") {
+                showingSetup.toggle()
+            }
+            .buttonStyle(.plain)
+            .foregroundStyle(.secondary)
             Button("Quit") { NSApplication.shared.terminate(nil) }
                 .buttonStyle(.plain)
                 .foregroundStyle(.secondary)
         }
+    }
+
+    private var backendStepState: SetupStepState {
+        switch model.backendSetupState {
+        case .checking: .checking
+        case .ready: .ready
+        case .notInstalled, .daemonUnavailable: .actionRequired
+        }
+    }
+
+    private var backendStepDetail: String {
+        switch model.backendSetupState {
+        case .checking:
+            "Checking for batt and its daemon."
+        case .notInstalled:
+            "batt is not installed. CoolCharge can monitor the battery, but cannot control charging yet."
+        case .daemonUnavailable:
+            "batt is installed, but its privileged daemon is not responding."
+        case .ready:
+            "batt is installed and its daemon is responding."
+        }
+    }
+
+    private var appleSettingsStepState: SetupStepState {
+        if model.appleChargingPolicyStatus.hasActivePolicy { return .actionRequired }
+        if model.appleSettingsConfirmed { return .ready }
+        return model.appleChargingPolicyStatus == .unavailable ? .reviewRequired : .actionRequired
+    }
+
+    private var appleSettingsStepDetail: String {
+        switch model.appleChargingPolicyStatus {
+        case .clear:
+            if model.appleSettingsConfirmed {
+                return "No active Apple charging policy was detected, and you confirmed both controls are off."
+            }
+            return "No active Apple charging policy was detected. macOS does not reliably expose both switch positions, so please confirm them once."
+        case .active(let policyCount):
+            return "Detected \(policyCount) active Apple charging \(policyCount == 1 ? "policy" : "policies"). Turn off Apple’s controls, then recheck."
+        case .unavailable:
+            if model.appleSettingsConfirmed {
+                return "macOS did not expose policy status; using your manual confirmation."
+            }
+            return "CoolCharge could not inspect Apple’s policy status. Open Battery Settings and confirm both controls are off."
+        }
+    }
+
+    private func setupStep<Actions: View>(
+        state: SetupStepState,
+        title: String,
+        detail: String,
+        @ViewBuilder actions: () -> Actions
+    ) -> some View {
+        HStack(alignment: .top, spacing: 11) {
+            Image(systemName: state.symbol)
+                .font(.title3.weight(.semibold))
+                .foregroundStyle(state.color)
+                .frame(width: 24, height: 24)
+
+            VStack(alignment: .leading, spacing: 6) {
+                Text(title)
+                    .font(.subheadline.weight(.semibold))
+                Text(detail)
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+                actions()
+            }
+            Spacer(minLength: 0)
+        }
+        .padding(12)
+        .background(.quaternary.opacity(0.45), in: RoundedRectangle(cornerRadius: 12))
+        .overlay {
+            RoundedRectangle(cornerRadius: 12)
+                .stroke(state.color.opacity(0.22), lineWidth: 1)
+        }
+    }
+
+    private func copySetupCommand() {
+        NSPasteboard.general.clearContents()
+        NSPasteboard.general.setString(model.backendSetupCommand, forType: .string)
+        copiedSetupCommand = true
+    }
+
+    private func openBatterySettings() {
+        let candidates = [
+            "x-apple.systempreferences:com.apple.Battery-Settings.extension",
+            "x-apple.systempreferences:com.apple.preference.battery"
+        ]
+        for candidate in candidates {
+            guard let url = URL(string: candidate) else { continue }
+            if NSWorkspace.shared.open(url) { return }
+        }
+    }
+
+    private func openURL(_ value: String) {
+        guard let url = URL(string: value) else { return }
+        NSWorkspace.shared.open(url)
+    }
+
+    private func finishSetup() {
+        hasCompletedWelcome = true
+        showingSetup = false
     }
 
     private var automaticButtonTitle: String {
@@ -419,8 +679,8 @@ private struct CoolChargeView: View {
         }
         .buttonStyle(.plain)
         .focusable(false)
-        .disabled(!model.backendAvailable || model.reading == nil || model.isCommandPending)
-        .opacity((!model.backendAvailable || model.reading == nil || model.isCommandPending) ? 0.5 : 1)
+        .disabled(!model.chargeControlReady || model.reading == nil || model.isCommandPending)
+        .opacity((!model.chargeControlReady || model.reading == nil || model.isCommandPending) ? 0.5 : 1)
     }
 
     private func settingRow<Accessory: View>(
@@ -443,6 +703,31 @@ private struct CoolChargeView: View {
         }
         .padding(11)
         .background(.quaternary.opacity(0.38), in: RoundedRectangle(cornerRadius: 11))
+    }
+}
+
+private enum SetupStepState {
+    case checking
+    case ready
+    case actionRequired
+    case reviewRequired
+
+    var symbol: String {
+        switch self {
+        case .checking: "clock"
+        case .ready: "checkmark.circle.fill"
+        case .actionRequired: "exclamationmark.circle.fill"
+        case .reviewRequired: "questionmark.circle.fill"
+        }
+    }
+
+    var color: Color {
+        switch self {
+        case .checking: .secondary
+        case .ready: .green
+        case .actionRequired: .orange
+        case .reviewRequired: .blue
+        }
     }
 }
 

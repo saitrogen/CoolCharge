@@ -2,12 +2,22 @@ import CoolChargeCore
 import Foundation
 import SwiftUI
 
+enum BackendSetupState: Equatable {
+    case checking
+    case notInstalled
+    case daemonUnavailable
+    case ready
+}
+
 @MainActor
 final class AppModel: ObservableObject {
     @Published private(set) var reading: BatteryReading?
     @Published private(set) var mode: ControlMode = .automatic
     @Published private(set) var message = "Reading battery…"
     @Published private(set) var backendAvailable = false
+    @Published private(set) var backendSetupState: BackendSetupState = .checking
+    @Published private(set) var appleChargingPolicyStatus: AppleChargingPolicyStatus = .unavailable
+    @Published private(set) var appleSettingsConfirmed: Bool
     @Published private(set) var isCommandPending = false
     @Published var targetPercentage: Int {
         didSet { defaults.set(targetPercentage, forKey: Keys.target) }
@@ -19,6 +29,7 @@ final class AppModel: ObservableObject {
     private enum Keys {
         static let target = "targetPercentage"
         static let temperature = "temperatureLimit"
+        static let appleSettingsConfirmed = "appleSettingsConfirmed"
     }
 
     private let defaults = UserDefaults.standard
@@ -38,6 +49,7 @@ final class AppModel: ObservableObject {
         targetPercentage = savedTarget == 0 ? 80 : savedTarget
         let savedTemperature = defaults.double(forKey: Keys.temperature)
         temperatureLimit = savedTemperature == 0 ? 35 : savedTemperature
+        appleSettingsConfirmed = defaults.bool(forKey: Keys.appleSettingsConfirmed)
         backendAvailable = false
         Task { @MainActor [weak self] in
             self?.start()
@@ -181,6 +193,56 @@ final class AppModel: ObservableObject {
         }
     }
 
+    var chargeControlReady: Bool {
+        backendAvailable && appleSettingsConfirmed && !appleChargingPolicyStatus.hasActivePolicy
+    }
+
+    var setupIsReady: Bool {
+        reading != nil && chargeControlReady
+    }
+
+    var backendSetupCommand: String {
+        switch backendSetupState {
+        case .checking, .ready:
+            return ""
+        case .notInstalled:
+            return "brew install batt\nsudo brew services start batt"
+        case .daemonUnavailable:
+            if batt.executableURL?.path.hasPrefix("/opt/homebrew/") == true {
+                return "sudo brew services start batt"
+            }
+            return "sudo batt install --allow-non-root-access"
+        }
+    }
+
+    var setupAttentionSummary: String {
+        switch backendSetupState {
+        case .checking:
+            return "Checking the charging backend."
+        case .notInstalled:
+            return "Install the batt backend to enable charging controls."
+        case .daemonUnavailable:
+            return "batt is installed, but its daemon is not responding."
+        case .ready:
+            if appleChargingPolicyStatus.hasActivePolicy {
+                return "An active Apple charging policy may conflict with CoolCharge."
+            }
+            if !appleSettingsConfirmed {
+                return "Review Apple’s battery controls before enabling CoolCharge."
+            }
+            return "Charging control is ready."
+        }
+    }
+
+    func confirmAppleSettingsAreOff() {
+        guard !appleChargingPolicyStatus.hasActivePolicy else { return }
+        appleSettingsConfirmed = true
+        defaults.set(true, forKey: Keys.appleSettingsConfirmed)
+        didSynchronizeBackend = false
+        message = "Apple charging settings confirmed"
+        refresh()
+    }
+
     func start() {
         guard timer == nil else { return }
         refresh()
@@ -199,24 +261,42 @@ final class AppModel: ObservableObject {
                 let newReading = try await reader.read()
                 reading = newReading
                 backendAvailable = await batt.isReady()
-                if backendAvailable {
+                backendSetupState = backendAvailable
+                    ? .ready
+                    : (batt.isAvailable ? .daemonUnavailable : .notInstalled)
+
+                appleChargingPolicyStatus = await Task.detached(priority: .utility) {
+                    AppleChargingPolicyInspector.inspectSystemPreferences()
+                }.value
+                if appleChargingPolicyStatus.hasActivePolicy {
+                    appleSettingsConfirmed = false
+                    defaults.set(false, forKey: Keys.appleSettingsConfirmed)
+                }
+
+                if chargeControlReady {
                     message = "Monitoring every 15 seconds"
                 } else if batt.isAvailable {
                     didSynchronizeBackend = false
                     lastRequestedLimit = nil
-                    message = "batt is installed — daemon setup required"
+                    if !backendAvailable {
+                        message = "batt is installed — daemon setup required"
+                    } else if appleChargingPolicyStatus.hasActivePolicy {
+                        message = "Apple charging policy detected — setup required"
+                    } else {
+                        message = "Review Apple charging settings to finish setup"
+                    }
                 } else {
                     didSynchronizeBackend = false
                     lastRequestedLimit = nil
                     message = "Monitoring only — batt is not installed"
                 }
-                if backendAvailable && !didSynchronizeBackend {
+                if chargeControlReady && !didSynchronizeBackend {
                     let decision = policy.resumeAutomatic(reading: newReading)
                     didSynchronizeBackend = await execute(
                         decision,
                         successMessage: "Automatic temperature control enabled"
                     )
-                } else {
+                } else if chargeControlReady {
                     await applyAutomaticPolicy(to: newReading)
                 }
             } catch {
@@ -226,12 +306,12 @@ final class AppModel: ObservableObject {
     }
 
     func holdNow() {
-        guard let reading else { return }
+        guard chargeControlReady, let reading else { return }
         apply(policy.enterManualHold(reading: reading), successMessage: "Charging paused at \(reading.percentage)%")
     }
 
     func resumeAutomatic() {
-        guard let reading else { return }
+        guard chargeControlReady, let reading else { return }
         apply(
             policy.resumeAutomatic(reading: reading),
             successMessage: "Automatic temperature control enabled"
@@ -239,6 +319,7 @@ final class AppModel: ObservableObject {
     }
 
     func chargeNow(to target: Int) {
+        guard chargeControlReady else { return }
         apply(
             policy.beginOverride(target: target),
             successMessage: "Temperature override active until \(target)%"
@@ -246,7 +327,7 @@ final class AppModel: ObservableObject {
     }
 
     func targetChanged() {
-        guard case .automatic = mode, let reading else { return }
+        guard chargeControlReady, case .automatic = mode, let reading else { return }
         apply(policy.resumeAutomatic(reading: reading), successMessage: "Charge target set to \(targetPercentage)%")
     }
 

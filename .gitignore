@@ -1,0 +1,4 @@
+.DS_Store
+.build/
+CoolCharge.app/
+Resources/Assets.xcassets/AppIcon.appiconset/*.png

@@ -368,7 +368,7 @@ private struct CoolChargeView: View {
 
     private func batteryFlowText(_ reading: BatteryReading) -> String {
         let power = reading.batteryPowerWatts
-        if abs(power) < 0.05 { return "0.0 W · held" }
+        if abs(power) < 0.05 { return "0.0 W · \(reading.isConnected ? "held" : "idle")" }
         return String(format: "%@%.1f W · %@", power > 0 ? "+" : "", power, power > 0 ? "charging" : "discharging")
     }
 

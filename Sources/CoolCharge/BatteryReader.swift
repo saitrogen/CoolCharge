@@ -66,7 +66,7 @@ struct BatteryReader: Sendable {
     }
 
     private static func signedInteger(named name: String, in text: String) -> Int? {
-        capture(#"\"\#(name)\"\s*=\s*(-?\d+)"#, in: text).flatMap(Int.init)
+        capture(#"\"\#(name)\"\s*=\s*(-?\d+)"#, in: text).flatMap(BatteryTelemetry.signedInt(from:))
     }
 
     private static func boolean(named name: String, in text: String) -> Bool {

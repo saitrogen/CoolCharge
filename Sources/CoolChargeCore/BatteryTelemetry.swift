@@ -16,6 +16,37 @@ public enum BatteryTelemetry {
         guard let unsigned = UInt64(text) else { return nil }
         return Int64(bitPattern: unsigned).toIntIfRepresentable
     }
+
+    /// Reads an integer only from the requested top-level `ioreg` dictionary.
+    /// This avoids confusing identically named fields from unrelated power
+    /// domains, such as `PowerOutDetails.Watts` and `AdapterDetails.Watts`.
+    public static func integer(
+        named valueName: String,
+        inDictionaryNamed dictionaryName: String,
+        from text: String
+    ) -> Int? {
+        let escapedDictionary = NSRegularExpression.escapedPattern(for: dictionaryName)
+        guard let dictionary = capture(
+            #"\"\#(escapedDictionary)\"\s*=\s*\{([^}]*)\}"#,
+            in: text
+        ) else { return nil }
+
+        let escapedValue = NSRegularExpression.escapedPattern(for: valueName)
+        return capture(
+            #"\"\#(escapedValue)\"\s*=\s*(\d+)"#,
+            in: dictionary
+        ).flatMap(Int.init)
+    }
+
+    private static func capture(_ pattern: String, in text: String) -> String? {
+        guard let expression = try? NSRegularExpression(pattern: pattern) else { return nil }
+        let range = NSRange(text.startIndex..<text.endIndex, in: text)
+        guard
+            let match = expression.firstMatch(in: text, range: range),
+            let captureRange = Range(match.range(at: 1), in: text)
+        else { return nil }
+        return String(text[captureRange])
+    }
 }
 
 private extension Int64 {

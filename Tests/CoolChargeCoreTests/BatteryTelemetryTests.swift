@@ -18,4 +18,30 @@ struct BatteryTelemetryTests {
         #expect(BatteryTelemetry.signedInt(from: "not-a-number") == nil)
         #expect(BatteryTelemetry.signedInt(from: "18446744073709551616") == nil)
     }
+
+    @Test func readsAdapterWattsWithoutUsingPowerOutWatts() {
+        let telemetry = #"""
+        "PowerOutDetails" = ({"Watts"=184,"Current"=35})
+        "AdapterDetails" = {"FamilyCode"=0,"Watts"=86}
+        """#
+
+        #expect(BatteryTelemetry.integer(
+            named: "Watts",
+            inDictionaryNamed: "AdapterDetails",
+            from: telemetry
+        ) == 86)
+    }
+
+    @Test func missingAdapterWattsDoesNotFallBackToAnotherDictionary() {
+        let telemetry = #"""
+        "PowerOutDetails" = ({"Watts"=184})
+        "AdapterDetails" = {"FamilyCode"=0}
+        """#
+
+        #expect(BatteryTelemetry.integer(
+            named: "Watts",
+            inDictionaryNamed: "AdapterDetails",
+            from: telemetry
+        ) == nil)
+    }
 }

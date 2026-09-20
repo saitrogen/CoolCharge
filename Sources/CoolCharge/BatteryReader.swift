@@ -43,16 +43,20 @@ struct BatteryReader: Sendable {
                 throw BatteryReaderError.incompleteReading
             }
 
+            let isConnected = Self.boolean(named: "ExternalConnected", in: text)
+
             return BatteryReading(
                 percentage: percentage,
                 temperatureCelsius: Double(rawTemperature) / 10 - 273.15,
-                isConnected: Self.boolean(named: "ExternalConnected", in: text),
+                isConnected: isConnected,
                 isCharging: Self.boolean(named: "IsCharging", in: text),
                 cycleCount: cycleCount,
                 batteryCurrentMilliamps: Self.signedInteger(named: "Amperage", in: text) ?? 0,
                 batteryVoltageVolts: Double(Self.integer(named: "Voltage", in: text) ?? 0) / 1_000,
                 adapterInputWatts: Double(Self.integer(named: "SystemPowerIn", in: text) ?? 0) / 1_000,
-                adapterRatedWatts: Self.integer(named: "Watts", in: text) ?? 0,
+                adapterRatedWatts: isConnected
+                    ? BatteryTelemetry.integer(named: "Watts", inDictionaryNamed: "AdapterDetails", from: text) ?? 0
+                    : 0,
                 systemLoadWatts: Double(Self.integer(named: "SystemLoad", in: text) ?? 0) / 1_000,
                 currentCapacityMilliampHours: Self.integer(named: "AppleRawCurrentCapacity", in: text) ?? 0,
                 fullCapacityMilliampHours: Self.integer(named: "AppleRawMaxCapacity", in: text) ?? 0,

@@ -34,14 +34,14 @@ private struct CoolChargeView: View {
     var body: some View {
         VStack(spacing: 0) {
             header
-                .padding(.horizontal, 18)
-                .padding(.vertical, 14)
+                .padding(.horizontal, 16)
+                .padding(.vertical, 13)
 
             Divider()
 
             ScrollViewReader { proxy in
                 ScrollView {
-                    VStack(alignment: .leading, spacing: 16) {
+                    VStack(alignment: .leading, spacing: 14) {
                         Color.clear.frame(height: 0).id("panelTop")
                         if showingSetup {
                             setupAssistant
@@ -56,7 +56,7 @@ private struct CoolChargeView: View {
                             settings
                         }
                     }
-                    .padding(18)
+                    .padding(16)
                 }
                 .onAppear {
                     proxy.scrollTo("panelTop", anchor: .top)
@@ -65,10 +65,11 @@ private struct CoolChargeView: View {
 
             Divider()
             footer
-                .padding(.horizontal, 18)
-                .padding(.vertical, 11)
+                .padding(.horizontal, 16)
+                .padding(.vertical, 10)
         }
-        .frame(width: 370, height: 650)
+        .frame(width: 380, height: 650)
+        .background(MenuWindowActivityObserver(model: model))
         .onAppear {
             if !hasCompletedWelcome {
                 showingSetup = true
@@ -164,7 +165,7 @@ private struct CoolChargeView: View {
             HStack(spacing: 10) {
                 Button("Recheck") {
                     copiedSetupCommand = false
-                    model.refresh()
+                    model.refresh(forceReadinessCheck: true)
                 }
                 .buttonStyle(.bordered)
 
@@ -219,37 +220,35 @@ private struct CoolChargeView: View {
     }
 
     private var stateBanner: some View {
-        HStack(alignment: .top, spacing: 11) {
-            Image(systemName: model.stateSymbol)
-                .font(.title3.weight(.semibold))
-                .foregroundStyle(stateColor)
-                .frame(width: 24, height: 24)
+        GroupBox {
+            HStack(alignment: .top, spacing: 11) {
+                Image(systemName: model.stateSymbol)
+                    .font(.title3.weight(.semibold))
+                    .symbolRenderingMode(.hierarchical)
+                    .foregroundStyle(stateColor)
+                    .frame(width: 24, height: 24)
 
-            VStack(alignment: .leading, spacing: 4) {
-                Text(model.statusTitle)
-                    .font(.headline)
-                Text(model.statusDetail)
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-                    .fixedSize(horizontal: false, vertical: true)
+                VStack(alignment: .leading, spacing: 4) {
+                    Text(model.statusTitle)
+                        .font(.headline)
+                    Text(model.statusDetail)
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                        .fixedSize(horizontal: false, vertical: true)
 
-                if model.thermalResumeDate != nil {
-                    TimelineView(.periodic(from: .now, by: 1)) { timeline in
-                        if let progress = model.thermalProgressText(at: timeline.date) {
-                            Text(progress)
-                                .font(.caption.weight(.medium).monospacedDigit())
-                                .foregroundStyle(stateColor)
+                    if model.thermalResumeDate != nil {
+                        TimelineView(.periodic(from: .now, by: 1)) { timeline in
+                            if let progress = model.thermalProgressText(at: timeline.date) {
+                                Text(progress)
+                                    .font(.caption.weight(.medium).monospacedDigit())
+                                    .foregroundStyle(stateColor)
+                            }
                         }
                     }
                 }
+                Spacer(minLength: 0)
             }
-            Spacer(minLength: 0)
-        }
-        .padding(12)
-        .background(stateColor.opacity(0.12), in: RoundedRectangle(cornerRadius: 12))
-        .overlay {
-            RoundedRectangle(cornerRadius: 12)
-                .stroke(stateColor.opacity(0.22), lineWidth: 1)
+            .padding(.vertical, 2)
         }
     }
 
@@ -263,11 +262,17 @@ private struct CoolChargeView: View {
     }
 
     private var header: some View {
-        HStack {
+        HStack(spacing: 10) {
+            Image(systemName: "snowflake.circle.fill")
+                .font(.system(size: 27, weight: .medium))
+                .symbolRenderingMode(.hierarchical)
+                .foregroundStyle(.tint)
+
             VStack(alignment: .leading, spacing: 3) {
                 Text("CoolCharge")
-                    .font(.title2.weight(.semibold))
+                    .font(.headline)
                 Text(model.modeTitle)
+                    .font(.caption)
                     .foregroundStyle(.secondary)
             }
             Spacer()
@@ -280,10 +285,10 @@ private struct CoolChargeView: View {
                     Circle()
                         .fill(model.chargeControlReady ? Color.green : Color.orange)
                         .frame(width: 7, height: 7)
-                    Text(model.chargeControlReady ? "Live · 15s" : "Setup")
+                    Text(model.monitoringStatus)
                 }
             }
-            .font(.caption.weight(.medium).monospacedDigit())
+            .font(.caption.weight(.medium))
             .foregroundStyle(.secondary)
         }
     }
@@ -291,15 +296,16 @@ private struct CoolChargeView: View {
     @ViewBuilder
     private var statusCard: some View {
         if let reading = model.reading {
-            HStack(spacing: 0) {
-                metric(value: "\(reading.percentage)%", label: batteryStateLabel(for: reading))
-                Divider().frame(height: 44)
-                metric(value: String(format: "%.1f°C", reading.temperatureCelsius), label: "Temperature")
-                Divider().frame(height: 44)
-                metric(value: "\(reading.cycleCount)", label: "Cycles")
+            GroupBox {
+                HStack(spacing: 0) {
+                    metric(value: "\(reading.percentage)%", label: batteryStateLabel(for: reading))
+                    Divider().frame(height: 38)
+                    metric(value: String(format: "%.1f°C", reading.temperatureCelsius), label: "Temperature")
+                    Divider().frame(height: 38)
+                    metric(value: "\(reading.cycleCount)", label: "Cycles")
+                }
+                .padding(.vertical, 3)
             }
-            .padding(.vertical, 12)
-            .background(.quaternary.opacity(0.55), in: RoundedRectangle(cornerRadius: 12))
         } else {
             ProgressView("Reading battery…")
                 .frame(maxWidth: .infinity, minHeight: 68)
@@ -318,36 +324,47 @@ private struct CoolChargeView: View {
     private var telemetryCard: some View {
         if let reading = model.reading {
             VStack(alignment: .leading, spacing: 10) {
-                sectionLabel("POWER FLOW")
-                detailRow(
-                    "Adapter input",
-                    reading.adapterRatedWatts > 0
-                        ? String(format: "%.1f W / %d W", reading.adapterInputWatts, reading.adapterRatedWatts)
-                        : String(format: "%.1f W", reading.adapterInputWatts)
-                )
-                detailRow("System load", String(format: "%.1f W", reading.systemLoadWatts))
-                detailRow("Battery flow", batteryFlowText(reading))
-                if let estimate = estimatedTimeToTarget(reading) {
-                    detailRow("Estimated to \(activeTarget)%", estimate)
+                GroupBox {
+                    VStack(spacing: 8) {
+                        detailRow(
+                            "Adapter input",
+                            reading.adapterRatedWatts > 0
+                                ? String(format: "%.1f W / %d W", reading.adapterInputWatts, reading.adapterRatedWatts)
+                                : String(format: "%.1f W", reading.adapterInputWatts)
+                        )
+                        detailRow("System load", String(format: "%.1f W", reading.systemLoadWatts))
+                        detailRow("Battery flow", batteryFlowText(reading))
+                        if let estimate = estimatedTimeToTarget(reading) {
+                            detailRow("Estimated to \(activeTarget)%", estimate)
+                        }
+                    }
+                    .padding(.vertical, 2)
+                } label: {
+                    Label("Power Flow", systemImage: "bolt.horizontal.fill")
+                        .font(.subheadline.weight(.semibold))
                 }
 
-                Divider()
-                sectionLabel("BATTERY HEALTH")
-                detailRow(
-                    "Full / design capacity",
-                    "\(reading.fullCapacityMilliampHours) / \(reading.designCapacityMilliampHours) mAh"
-                )
-                detailRow("Health", "\(reading.healthPercentage)%")
-                detailRow("Voltage", String(format: "%.2f V", reading.batteryVoltageVolts))
-                detailRow("Current", formattedCurrent(reading.batteryCurrentMilliamps))
+                GroupBox {
+                    VStack(spacing: 8) {
+                        detailRow(
+                            "Full / design capacity",
+                            "\(reading.fullCapacityMilliampHours) / \(reading.designCapacityMilliampHours) mAh"
+                        )
+                        detailRow("Health", "\(reading.healthPercentage)%")
+                        detailRow("Voltage", String(format: "%.2f V", reading.batteryVoltageVolts))
+                        detailRow("Current", formattedCurrent(reading.batteryCurrentMilliamps))
+                    }
+                    .padding(.vertical, 2)
+                } label: {
+                    Label("Battery Health", systemImage: "heart.text.square.fill")
+                        .font(.subheadline.weight(.semibold))
+                }
 
                 Text("Apple battery telemetry; SMC sensor apps can report different power domains and sampling times.")
                     .font(.caption2)
                     .foregroundStyle(.tertiary)
                     .fixedSize(horizontal: false, vertical: true)
             }
-            .padding(12)
-            .background(.quaternary.opacity(0.45), in: RoundedRectangle(cornerRadius: 12))
         }
     }
 
@@ -409,7 +426,8 @@ private struct CoolChargeView: View {
 
     private var controls: some View {
         VStack(alignment: .leading, spacing: 10) {
-            sectionLabel("CHARGING MODE")
+            Text("Charging Mode")
+                .font(.subheadline.weight(.semibold))
 
             LazyVGrid(
                 columns: [GridItem(.flexible(), spacing: 8), GridItem(.flexible(), spacing: 8)],
@@ -419,7 +437,6 @@ private struct CoolChargeView: View {
                     title: automaticButtonTitle,
                     subtitle: automaticButtonSubtitle,
                     icon: model.mode.isThermalHold ? "snowflake" : "arrow.triangle.2.circlepath",
-                    color: model.mode.isThermalHold ? .cyan : .blue,
                     isActive: model.mode.isAutomaticFamily
                 ) {
                     model.resumeAutomatic()
@@ -429,7 +446,6 @@ private struct CoolChargeView: View {
                     title: "Hold Here",
                     subtitle: "Adapter only",
                     icon: "pause.fill",
-                    color: .orange,
                     isActive: model.mode.isManualHold
                 ) {
                     model.holdNow()
@@ -439,7 +455,6 @@ private struct CoolChargeView: View {
                     title: "Charge Now",
                     subtitle: "Ignore heat · \(model.targetPercentage)%",
                     icon: "bolt.fill",
-                    color: .pink,
                     isActive: model.mode.isTargetOverride(model.targetPercentage)
                 ) {
                     model.chargeNow(to: model.targetPercentage)
@@ -449,7 +464,6 @@ private struct CoolChargeView: View {
                     title: "Top Up",
                     subtitle: "Ignore heat · 100%",
                     icon: "battery.100percent",
-                    color: .purple,
                     isActive: model.mode.isTargetOverride(100)
                 ) {
                     model.chargeNow(to: 100)
@@ -460,34 +474,43 @@ private struct CoolChargeView: View {
 
     private var settings: some View {
         VStack(alignment: .leading, spacing: 10) {
-            sectionLabel("AUTOMATIC CONTROL")
+            Text("Automatic Control")
+                .font(.subheadline.weight(.semibold))
 
-            settingRow(
-                icon: "target",
-                title: "Charge target",
-                subtitle: "Automatic mode stops here"
-            ) {
-                HStack(spacing: 7) {
-                    Text("\(model.targetPercentage)%")
-                        .font(.headline.monospacedDigit())
-                    Stepper("", value: $model.targetPercentage, in: 50...100, step: 5)
-                        .labelsHidden()
-                        .fixedSize()
-                }
-            }
-            .onChange(of: model.targetPercentage) { _ in model.targetChanged() }
+            GroupBox {
+                VStack(spacing: 0) {
+                    settingRow(
+                        icon: "target",
+                        title: "Charge target",
+                        subtitle: "Automatic mode stops here"
+                    ) {
+                        HStack(spacing: 7) {
+                            Text("\(model.targetPercentage)%")
+                                .font(.headline.monospacedDigit())
+                            Stepper("", value: $model.targetPercentage, in: 50...100, step: 5)
+                                .labelsHidden()
+                                .fixedSize()
+                        }
+                    }
+                    .onChange(of: model.targetPercentage) { _ in model.targetChanged() }
 
-            settingRow(
-                icon: "thermometer.medium",
-                title: "Pause temperature",
-                subtitle: String(format: "Pause ≥ %.0f°C · resume ≤ %.0f°C", model.temperatureLimit, model.resumeTemperature)
-            ) {
-                HStack(spacing: 7) {
-                    Text(String(format: "%.0f°C", model.temperatureLimit))
-                        .font(.headline.monospacedDigit())
-                    Stepper("", value: $model.temperatureLimit, in: 30...45, step: 1)
-                        .labelsHidden()
-                        .fixedSize()
+                    Divider()
+                        .padding(.leading, 35)
+
+                    settingRow(
+                        icon: "thermometer.medium",
+                        title: "Pause temperature",
+                        subtitle: String(format: "Pause ≥ %.0f°C · resume ≤ %.0f°C", model.temperatureLimit, model.resumeTemperature)
+                    ) {
+                        HStack(spacing: 7) {
+                            Text(String(format: "%.0f°C", model.temperatureLimit))
+                                .font(.headline.monospacedDigit())
+                            Stepper("", value: $model.temperatureLimit, in: 30...45, step: 1)
+                                .labelsHidden()
+                                .fixedSize()
+                        }
+                    }
+                    .onChange(of: model.temperatureLimit) { _ in model.temperatureChanged() }
                 }
             }
 
@@ -502,8 +525,7 @@ private struct CoolChargeView: View {
             }
             .font(.caption)
             .foregroundStyle(.secondary)
-            .padding(10)
-            .background(.blue.opacity(0.08), in: RoundedRectangle(cornerRadius: 10))
+            .padding(.horizontal, 4)
         }
     }
 
@@ -517,6 +539,9 @@ private struct CoolChargeView: View {
                 .foregroundStyle(.secondary)
                 .lineLimit(1)
             Spacer()
+            Text("v\(appVersion)")
+                .font(.caption2.monospacedDigit())
+                .foregroundStyle(.tertiary)
             Button(showingSetup ? "Dashboard" : "Setup") {
                 showingSetup.toggle()
             }
@@ -645,7 +670,6 @@ private struct CoolChargeView: View {
         title: String,
         subtitle: String,
         icon: String,
-        color: Color,
         isActive: Bool,
         action: @escaping () -> Void
     ) -> some View {
@@ -654,6 +678,7 @@ private struct CoolChargeView: View {
                 HStack {
                     Image(systemName: icon)
                         .font(.headline)
+                        .symbolRenderingMode(.hierarchical)
                     Spacer()
                     if isActive {
                         Image(systemName: "checkmark.circle.fill")
@@ -665,16 +690,19 @@ private struct CoolChargeView: View {
                     .font(.caption2)
                     .foregroundStyle(.secondary)
             }
-            .frame(maxWidth: .infinity, minHeight: 68, alignment: .leading)
+            .frame(maxWidth: .infinity, minHeight: 64, alignment: .leading)
             .padding(11)
-            .foregroundStyle(isActive ? color : .primary)
+            .foregroundStyle(isActive ? Color.accentColor : .primary)
             .background(
-                isActive ? color.opacity(0.18) : Color.secondary.opacity(0.07),
-                in: RoundedRectangle(cornerRadius: 11)
+                isActive ? Color.accentColor.opacity(0.14) : Color(nsColor: .controlBackgroundColor),
+                in: RoundedRectangle(cornerRadius: 9)
             )
             .overlay {
-                RoundedRectangle(cornerRadius: 11)
-                    .stroke(isActive ? color.opacity(0.8) : Color.secondary.opacity(0.12), lineWidth: isActive ? 2 : 1)
+                RoundedRectangle(cornerRadius: 9)
+                    .stroke(
+                        isActive ? Color.accentColor.opacity(0.9) : Color(nsColor: .separatorColor).opacity(0.65),
+                        lineWidth: isActive ? 1.5 : 0.5
+                    )
             }
         }
         .buttonStyle(.plain)
@@ -701,8 +729,12 @@ private struct CoolChargeView: View {
             Spacer(minLength: 8)
             accessory()
         }
-        .padding(11)
-        .background(.quaternary.opacity(0.38), in: RoundedRectangle(cornerRadius: 11))
+        .padding(.vertical, 10)
+        .padding(.horizontal, 8)
+    }
+
+    private var appVersion: String {
+        Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "Development"
     }
 }
 
@@ -727,6 +759,70 @@ private enum SetupStepState {
         case .ready: .green
         case .actionRequired: .orange
         case .reviewRequired: .blue
+        }
+    }
+}
+
+private struct MenuWindowActivityObserver: NSViewRepresentable {
+    let model: AppModel
+
+    func makeNSView(context: Context) -> ActivityView {
+        let view = ActivityView()
+        view.onStateChanged = { presented in
+            Task { @MainActor in
+                model.setMenuPresented(presented)
+            }
+        }
+        return view
+    }
+
+    func updateNSView(_ nsView: ActivityView, context: Context) {}
+
+    @MainActor
+    final class ActivityView: NSView {
+        var onStateChanged: ((Bool) -> Void)?
+        private weak var observedWindow: NSWindow?
+        private var notificationTokens: [NSObjectProtocol] = []
+
+        override func viewDidMoveToWindow() {
+            super.viewDidMoveToWindow()
+            observe(window: window)
+        }
+
+        private func observe(window: NSWindow?) {
+            notificationTokens.forEach(NotificationCenter.default.removeObserver)
+            notificationTokens.removeAll()
+            observedWindow = window
+
+            guard let window else {
+                onStateChanged?(false)
+                return
+            }
+
+            onStateChanged?(window.isKeyWindow)
+            let center = NotificationCenter.default
+            notificationTokens.append(center.addObserver(
+                forName: NSWindow.didBecomeKeyNotification,
+                object: window,
+                queue: .main
+            ) { [weak self] _ in
+                Task { @MainActor [weak self] in
+                    self?.onStateChanged?(true)
+                }
+            })
+            notificationTokens.append(center.addObserver(
+                forName: NSWindow.didResignKeyNotification,
+                object: window,
+                queue: .main
+            ) { [weak self] _ in
+                Task { @MainActor [weak self] in
+                    self?.onStateChanged?(false)
+                }
+            })
+        }
+
+        isolated deinit {
+            notificationTokens.forEach(NotificationCenter.default.removeObserver)
         }
     }
 }

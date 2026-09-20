@@ -19,6 +19,7 @@ final class AppModel: ObservableObject {
     @Published private(set) var appleChargingPolicyStatus: AppleChargingPolicyStatus = .unavailable
     @Published private(set) var appleSettingsConfirmed: Bool
     @Published private(set) var isCommandPending = false
+    @Published private(set) var pollingInterval: TimeInterval = TelemetryPollingPolicy.backgroundInterval
     @Published var targetPercentage: Int {
         didSet { defaults.set(targetPercentage, forKey: Keys.target) }
     }
@@ -37,6 +38,11 @@ final class AppModel: ObservableObject {
     private let batt = BattClient()
     private var timer: Timer?
     private var isRefreshing = false
+    private var hasStarted = false
+    private var menuIsPresented = false
+    private var refreshRequestedAfterCurrent = false
+    private var queuedReadinessCheck = false
+    private var nextReadinessCheck = Date.distantPast
     private var didSynchronizeBackend = false
     private var lastRequestedLimit: Int?
 
@@ -85,8 +91,18 @@ final class AppModel: ObservableObject {
     }
 
     var menuBarBadgeSymbol: String? {
-        guard let reading, reading.isConnected else { return nil }
-        return reading.isCharging ? "bolt.fill" : "powerplug.fill"
+        guard let reading else { return nil }
+        switch mode {
+        case .thermalHold:
+            return "snowflake"
+        case .manualHold:
+            return "pause.fill"
+        case .override:
+            return "bolt.fill"
+        case .automatic:
+            guard reading.isConnected else { return nil }
+            return reading.isCharging ? "bolt.fill" : "powerplug.fill"
+        }
     }
 
     var menuBarAccessibilityLabel: String {
@@ -201,6 +217,11 @@ final class AppModel: ObservableObject {
         reading != nil && chargeControlReady
     }
 
+    var monitoringStatus: String {
+        let state = chargeControlReady ? "Live" : "Setup"
+        return "\(state) · \(Int(pollingInterval.rounded()))s"
+    }
+
     var backendSetupCommand: String {
         switch backendSetupState {
         case .checking, .ready:
@@ -240,41 +261,75 @@ final class AppModel: ObservableObject {
         defaults.set(true, forKey: Keys.appleSettingsConfirmed)
         didSynchronizeBackend = false
         message = "Apple charging settings confirmed"
-        refresh()
+        refresh(forceReadinessCheck: true)
     }
 
     func start() {
-        guard timer == nil else { return }
-        refresh()
-        timer = Timer.scheduledTimer(withTimeInterval: 15, repeats: true) { [weak self] _ in
-            Task { @MainActor in self?.refresh() }
+        guard !hasStarted else { return }
+        hasStarted = true
+        refresh(forceReadinessCheck: true)
+    }
+
+    func setMenuPresented(_ presented: Bool) {
+        guard menuIsPresented != presented else { return }
+        menuIsPresented = presented
+        updatePollingInterval()
+        if presented {
+            refresh()
+        } else {
+            schedulePollingTimer()
         }
     }
 
-    func refresh() {
-        guard !isRefreshing else { return }
+    func refresh(forceReadinessCheck: Bool = false) {
+        guard !isRefreshing else {
+            refreshRequestedAfterCurrent = true
+            queuedReadinessCheck = queuedReadinessCheck || forceReadinessCheck
+            return
+        }
+        timer?.invalidate()
+        timer = nil
         isRefreshing = true
 
-        Task {
-            defer { isRefreshing = false }
+        Task { @MainActor [weak self] in
+            guard let self else { return }
+            defer {
+                isRefreshing = false
+                if refreshRequestedAfterCurrent {
+                    let shouldCheckReadiness = queuedReadinessCheck
+                    refreshRequestedAfterCurrent = false
+                    queuedReadinessCheck = false
+                    Task { @MainActor [weak self] in
+                        self?.refresh(forceReadinessCheck: shouldCheckReadiness)
+                    }
+                } else {
+                    schedulePollingTimer()
+                }
+            }
             do {
                 let newReading = try await reader.read()
                 reading = newReading
-                backendAvailable = await batt.isReady()
-                backendSetupState = backendAvailable
-                    ? .ready
-                    : (batt.isAvailable ? .daemonUnavailable : .notInstalled)
+                updatePollingInterval()
 
-                appleChargingPolicyStatus = await Task.detached(priority: .utility) {
-                    AppleChargingPolicyInspector.inspectSystemPreferences()
-                }.value
-                if appleChargingPolicyStatus.hasActivePolicy {
-                    appleSettingsConfirmed = false
-                    defaults.set(false, forKey: Keys.appleSettingsConfirmed)
+                let shouldCheckReadiness = forceReadinessCheck || Date() >= nextReadinessCheck
+                if shouldCheckReadiness {
+                    backendAvailable = await batt.isReady()
+                    backendSetupState = backendAvailable
+                        ? .ready
+                        : (batt.isAvailable ? .daemonUnavailable : .notInstalled)
+
+                    appleChargingPolicyStatus = await Task.detached(priority: .utility) {
+                        AppleChargingPolicyInspector.inspectSystemPreferences()
+                    }.value
+                    if appleChargingPolicyStatus.hasActivePolicy {
+                        appleSettingsConfirmed = false
+                        defaults.set(false, forKey: Keys.appleSettingsConfirmed)
+                    }
+                    nextReadinessCheck = Date().addingTimeInterval(TelemetryPollingPolicy.backgroundInterval)
                 }
 
                 if chargeControlReady {
-                    message = "Monitoring every 15 seconds"
+                    message = "Monitoring battery telemetry"
                 } else if batt.isAvailable {
                     didSynchronizeBackend = false
                     lastRequestedLimit = nil
@@ -305,6 +360,27 @@ final class AppModel: ObservableObject {
         }
     }
 
+    private func updatePollingInterval() {
+        pollingInterval = TelemetryPollingPolicy.interval(
+            menuPresented: menuIsPresented,
+            reading: reading,
+            temperatureLimit: temperatureLimit
+        )
+    }
+
+    private func schedulePollingTimer() {
+        guard hasStarted, !isRefreshing else { return }
+        timer?.invalidate()
+        updatePollingInterval()
+        timer = Timer.scheduledTimer(withTimeInterval: pollingInterval, repeats: false) { [weak self] _ in
+            Task { @MainActor [weak self] in
+                guard let self else { return }
+                self.timer = nil
+                self.refresh()
+            }
+        }
+    }
+
     func holdNow() {
         guard chargeControlReady, let reading else { return }
         apply(policy.enterManualHold(reading: reading), successMessage: "Charging paused at \(reading.percentage)%")
@@ -327,8 +403,19 @@ final class AppModel: ObservableObject {
     }
 
     func targetChanged() {
-        guard chargeControlReady, case .automatic = mode, let reading else { return }
+        guard chargeControlReady, case .automatic = mode, let reading else {
+            refresh()
+            return
+        }
         apply(policy.resumeAutomatic(reading: reading), successMessage: "Charge target set to \(targetPercentage)%")
+    }
+
+    func temperatureChanged() {
+        guard chargeControlReady, case .automatic = mode, let reading else {
+            refresh()
+            return
+        }
+        apply(policy.resumeAutomatic(reading: reading), successMessage: "Pause temperature set to \(formattedTemperatureLimit)")
     }
 
     private var policy: ChargePolicy {
@@ -397,6 +484,9 @@ final class AppModel: ObservableObject {
             }
             mode = decision.mode
             message = successMessage
+            if decision.command != .none {
+                refresh()
+            }
             return true
         } catch {
             message = error.localizedDescription
